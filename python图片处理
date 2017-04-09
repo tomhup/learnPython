@@ -20,3 +20,109 @@ im.show()
 
     
    
+输网络数据就用最基本的socket，那么，树莓派上的代码就如下所示：
+[python] view plaincopy 
+<span style="font-size:18px;">import cv  
+import time, socket, Image, StringIO  
+  
+capture = cv.CaptureFromCAM(0)  
+cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_WIDTH, 640)  
+cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_HEIGHT, 480)  
+  
+HOST, PORT = "192.168.0.102", 9999  
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
+sock.connect((HOST, PORT))  
+  
+while True:  
+    img = cv.QueryFrame(capture)  
+    pi = Image.fromstring("RGB", cv.GetSize(img), img.tostring())  
+    buf = StringIO.StringIO()  
+    pi.save(buf, format = "JPEG")  
+    jpeg = buf.getvalue()  
+    buf.close()  
+    transfer = jpeg.replace("\n", "\-n")  
+    print len(transfer), transfer[-1]  
+    sock.sendall(transfer + "\n")  
+    time.sleep(0.5)  
+      
+sock.close()</span>  
+上述代码有几处需要解释的地方：
+pi = Image.fromstring(...)
+此处用到了python imaging library(PIL)，用获取到的帧建立了一个Image实例。这样做的目的在于减少传输的数据量。一幅640x480的RGB图像，原始数据长度为640x480x3=921600Byte，对于2M带宽的小水管来说太多了。这里用PIL来压缩成jpeg格式，能大大减少数据量。opencv本身也提供了保存为jpeg的函数，但可能是由于压缩程度不同。opencv得到的jpeg图像大小为60kb，而PIL得到的jpeg图像仅为19kb。
+buf = StringIO.StringIO()
+pi.save(buf, ...)
+Image提供的save方法，需要将jpeg格式的图像存入一个文件中。但这里显然不需要也最好不要将图像写进硬盘，因此需要一个内存中的“文件”，这就是StringIO。
+transfer = jpeg.replace(...)
+socket只是一个持续的流，读取时需要能断句，因此将数据中的“\n”替换掉，然后在一帧数据之后手工加上一个“\n”。
+time.sleep(0.5)
+用来控制fps，0.5相当于是2 fps。
+
+树莓派支持很多种的摄像头，详见http://elinux.org/RPi_VerifiedPeripherals，这里用的是微软的LifeCam VX 800，即插即用。运行上述程序，恩？窗口是黑的？select timeout？楼主坑爹啊！！！别急，这是因为摄像头自带的麦克风不兼容。在/etc/modprobe.d/下新建一个文件camera-blacklist.conf，写上blacklist snd_usb_audio，拔出摄像头，然后rmmod snd_usb_audio，再插上摄像头，即可。若还未解决，属顽固问题，请参考http://www.raspberrypi.org/phpBB3/viewtopic.php?t=35689&p=314596。
+
+二、
+服务器端用来中转数据，主旨是提供一个外网ip。上代码：
+[python] view plaincopy 
+<span style="font-size:18px;">import socket, time  
+  
+sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)  
+sock.bind(("192.168.0.102", 9999))  
+sock.listen(2)  
+  
+src, src_addr = sock.accept()  
+print "Source Connected by", src_addr  
+  
+dst, dst_addr = sock.accept()  
+print "Destination Connected by", dst_addr  
+  
+while True:  
+    msg = src.recv(1024 * 1024)  
+    #print len(msg)  
+    if not msg:  
+        break  
+    try:  
+        dst.sendall(msg)  
+    except Exception as ex:  
+        dst, dst_addr = sock.accept()  
+        print "Destination Connected Again By", dst_addr  
+    except KeyboardInterrupt:  
+        print "Interrupted"  
+        break  
+  
+src.close()  
+dst.close()  
+sock.close()  
+</span>  
+时间有限，写得非常简单：等两个连接，头一个是数据源，第二个是客户端；收到从数据源来的数据就转发给客户端。有志于做成多点连接的童鞋请自行修改逻辑。
+
+三、
+客户端接受到数据之后还原为图像显示出来即可，相当于是数据源的逆操作。代码如下：
+[python] view plaincopy 
+import cv2.cv as cv  
+import socket, time, Image, StringIO  
+  
+HOST, PORT = "192.168.0.102", 9999  
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
+sock.connect((HOST, PORT))  
+f = sock.makefile()  
+  
+cv.NamedWindow("camera_server")  
+  
+while True:  
+    msg = f.readline()  
+    if not msg:  
+        break  
+    print len(msg), msg[-2]  
+    jpeg = msg.replace("\-n", "\n")  
+    buf = StringIO.StringIO(jpeg[0:-1])  
+    buf.seek(0)  
+    pi = Image.open(buf)  
+    img = cv.CreateImageHeader((640, 480), cv.IPL_DEPTH_8U, 3)  
+    cv.SetData(img, pi.tostring())  
+    buf.close()  
+    cv.ShowImage("camera_server", img)  
+    if cv.WaitKey(10) == 27:  
+        break  
+  
+sock.close()  
+cv.DestroyAllWindows()  
+先逆转换“\n”，然后将接收到的数据用PIL打开，从中建立img，并显示在窗口中。注意，如果在数据源处改动了640x480的分辨率，这里也要更改
