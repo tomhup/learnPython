@@ -1,0 +1,22 @@
+降PLI读取的图片转换为numpy的array格式
+import Image
+import numpy as np
+im=Image.open('d:/KA.tiff')
+lx,ly=im.size
+m=0
+mtr=np.zeros((lx,ly),np.int)
+while m    n=0
+    while n        mtr[m][n]=im.getpixel((m,n))/255.0
+        n=n+1
+    m=m+1
+ 
+ 或者
+ mtr=np.array(im)
+ 
+ 直接读取url地址的图片 cSringIO
+f=cStringIO.StringIO(r.content)
+im = Image.open(f)
+im.show()
+
+    
+   
