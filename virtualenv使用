@@ -1,0 +1,6 @@
+virtualenv Permission denied
+新建的python虚拟环境的目录的所属者必须是当前用户，才不会出现这种错误
+比如
+virtualenv py27
+chown ppc py27
+再进入这个虚拟环境就不会出现这个情况了
