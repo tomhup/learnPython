@@ -17,7 +17,7 @@ while m    n=0
 f=cStringIO.StringIO(r.content)
 im = Image.open(f)
 im.show()
-
+img = np.asarray(im)
     
    
 输网络数据就用最基本的socket，那么，树莓派上的代码就如下所示：
